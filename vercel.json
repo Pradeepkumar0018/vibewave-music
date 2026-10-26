@@ -5,10 +5,7 @@
   "outputDirectory": "client/dist",
   "functions": {
     "api/[...path].js": {
-      "includeFiles": [
-        "data/spotify_tracks.csv",
-        "server/models/emotion-knn.json"
-      ]
+      "includeFiles": "{data/spotify_tracks.csv,server/models/emotion-knn.json}"
     }
   }
 }
