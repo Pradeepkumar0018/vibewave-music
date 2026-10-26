@@ -2,7 +2,10 @@
   "name": "vibewave-music",
   "version": "2.0.0",
   "private": true,
-  "workspaces": ["client", "server"],
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
     "dev": "concurrently -k -n api,web -c green,cyan \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm --workspace server run dev",
@@ -11,5 +14,8 @@
     "build": "npm --workspace client run build",
     "start": "npm --workspace server start"
   },
-  "devDependencies": { "concurrently": "^9.1.2" }
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "type": "module"
 }
