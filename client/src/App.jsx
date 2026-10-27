@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { AudioLines, CircleHelp, Disc3, Headphones, Music2, Pause, Play, Radio, Search, Sparkles, Upload, Volume2 } from 'lucide-react';
+import { AudioLines, CircleHelp, Disc3, Headphones, Heart, Music2, Pause, Play, Radio, Search, Sparkles, Upload, Volume2 } from 'lucide-react';
+
+function readLocalFavorites() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('vibewave-favorites') || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch { return []; }
+}
+
+function saveLocalFavorites(songs) {
+  try { localStorage.setItem('vibewave-favorites', JSON.stringify(songs)); } catch { /* Storage may be disabled. */ }
+}
 
 const moods = [
   { name: 'Happy', icon: '☀️', color: '#f6bd60' }, { name: 'Calm', icon: '🌿', color: '#7fb69b' },
@@ -13,11 +24,26 @@ export default function App() {
   const [language, setLanguage] = useState('Tamil'), [query, setQuery] = useState('');
   const [playing, setPlaying] = useState(null), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const [api, setApi] = useState(false), [model, setModel] = useState(null);
-  const fileRef = useRef(null), audioRef = useRef(null);
+  const [favorites, setFavorites] = useState(readLocalFavorites), [favoritesApi, setFavoritesApi] = useState('checking');
+  const [view, setView] = useState('recommendations');
+  const fileRef = useRef(null), audioRef = useRef(null), favoritesLoadStarted = useRef(false);
 
   useEffect(() => {
     fetch('/api/health').then(r => r.json()).then(d => { setApi(true); setModel(d.model); }).catch(() => setApi(false));
     loadSongs('Happy', 'Tamil');
+    if (favoritesLoadStarted.current) return;
+    favoritesLoadStarted.current = true;
+    fetch('/api/favorites').then(async res => {
+      if (!res.ok) throw new Error('Favorites API unavailable');
+      return res.json();
+    }).then(async remoteFavorites => {
+      const localFavorites = readLocalFavorites(), remoteIds = new Set(remoteFavorites.map(song => song.trackId));
+      const merged = [...remoteFavorites, ...localFavorites.filter(song => !remoteIds.has(song.trackId))];
+      setFavorites(merged); saveLocalFavorites(merged); setFavoritesApi('available');
+      for (const song of localFavorites.filter(item => !remoteIds.has(item.trackId))) {
+        await fetch('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ song }) });
+      }
+    }).catch(() => setFavoritesApi('device'));
   }, []);
 
   async function loadSongs(selectedMood = mood, selectedLanguage = language, search = query) {
@@ -33,9 +59,28 @@ export default function App() {
     finally { setBusy(false); }
   }
 
-  function chooseMood(next) { setMood(next); loadSongs(next, language); }
-  function chooseLanguage(e) { setLanguage(e.target.value); loadSongs(mood, e.target.value); }
-  function search(e) { e.preventDefault(); loadSongs(mood, language, query); }
+  function chooseMood(next) { setView('recommendations'); setMood(next); loadSongs(next, language); }
+  function chooseLanguage(e) { setView('recommendations'); setLanguage(e.target.value); loadSongs(mood, e.target.value); }
+  function search(e) { e.preventDefault(); setView('recommendations'); loadSongs(mood, language, query); }
+  async function toggleFavorite(song) {
+    const isSaved = favorites.some(item => item.trackId === song.trackId);
+    const next = isSaved ? favorites.filter(item => item.trackId !== song.trackId) : [song, ...favorites];
+    setFavorites(next); saveLocalFavorites(next);
+    setMessage(isSaved ? 'Removed from your favorites.' : 'Added to your favorites.');
+    if (favoritesApi !== 'available') return;
+    try {
+      const res = isSaved
+        ? await fetch(`/api/favorites/${encodeURIComponent(song.trackId)}`, { method: 'DELETE' })
+        : await fetch('/api/favorites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ song }) });
+      if (!res.ok) setFavoritesApi('device');
+    } catch { setFavoritesApi('device'); }
+  }
+
+  function showFavorites() {
+    setView('favorites');
+    document.getElementById('recommendations')?.scrollIntoView({ behavior: 'smooth' });
+  }
+
   function togglePlay(song) {
     if (!song.previewUrl) {
       if (song.trackUrl) window.open(song.trackUrl, '_blank', 'noopener,noreferrer');
@@ -53,6 +98,7 @@ export default function App() {
     try {
       const res = await fetch('/api/emotion/analyze', { method: 'POST', body });
       const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Audio analysis failed');
+      setView('recommendations');
       setMood(data.emotion);
       await loadSongs(data.emotion, language);
       setMessage(`Voice estimate: ${data.emotion.toLowerCase()}.`);
@@ -68,7 +114,8 @@ export default function App() {
       <a className="nav-item active" href="#discover"><Radio size={17}/> Discover</a>
       <a className="nav-item" href="#mood"><Sparkles size={17}/> Mood match</a>
       <div className="side-label library-label">YOUR LIBRARY</div>
-      <a className="nav-item" href="#recommendations"><Headphones size={17}/> For you</a>
+      <a className="nav-item" href="#recommendations" onClick={() => setView('recommendations')}><Headphones size={17}/> For you</a>
+      <a className={`nav-item ${view === 'favorites' ? 'active' : ''}`} href="#recommendations" onClick={e => { e.preventDefault(); showFavorites(); }}><Heart size={17}/> Favorites <span className="favorite-count">{favorites.length}</span></a>
       <div className="sidebar-note"><div className="note-icon"><Music2 size={18}/></div><strong>A little music<br/>for every feeling.</strong><p>Tell us how you feel. We’ll find the soundtrack.</p></div>
       <div className="side-bottom"><span className={`status-dot ${api ? 'online' : ''}`}></span>{api ? 'Music service connected' : 'Connecting to music service'}</div>
     </aside>
@@ -89,12 +136,14 @@ export default function App() {
           {model && <p className="model-note"><span className="model-dot"></span>Voice model {model.ready ? `ready · ${model.samples} training clips` : 'needs training · run npm run train:model'}</p>}
         </section>
 
-        <section id="recommendations" className="music-section"><div className="section-head music-head"><div><span className="eyebrow muted">A MIX FOR YOUR MOMENT</span><h2>Your {mood.toLowerCase()} mix</h2><p>Picked from the VibeWave collection, just for you.</p></div><div className="music-controls"><label className="language-select"><span>Language</span><select value={language} onChange={chooseLanguage}><option>Tamil</option><option>Hindi</option><option>Telugu</option><option>Malayalam</option><option>English</option></select></label><form onSubmit={search} className="search-box"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find a song or artist"/><button aria-label="Search"><span>↵</span></button></form></div></div>
+        <section id="recommendations" className="music-section"><div className="section-head music-head"><div><span className="eyebrow muted">{view === 'favorites' ? 'YOUR PERSONAL COLLECTION' : 'A MIX FOR YOUR MOMENT'}</span><h2>{view === 'favorites' ? 'Your favorites' : `Your ${mood.toLowerCase()} mix`}</h2><p>{view === 'favorites' ? 'Songs you saved on this browser.' : 'Picked from the VibeWave collection, just for you.'}</p></div>{view === 'recommendations' && <div className="music-controls"><label className="language-select"><span>Language</span><select value={language} onChange={chooseLanguage}><option>Tamil</option><option>Hindi</option><option>Telugu</option><option>Malayalam</option><option>English</option></select></label><form onSubmit={search} className="search-box"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find a song or artist"/><button aria-label="Search"><span>↵</span></button></form></div>}</div>
+          <div className="collection-tabs" role="tablist" aria-label="Song collection"><button type="button" role="tab" aria-selected={view === 'recommendations'} className={view === 'recommendations' ? 'selected' : ''} onClick={() => setView('recommendations')}>For you</button><button type="button" role="tab" aria-selected={view === 'favorites'} className={view === 'favorites' ? 'selected' : ''} onClick={() => setView('favorites')}><Heart size={13}/> Favorites <span>{favorites.length}</span></button></div>
           {message && <div className="message-bar">{message}</div>}
-          <div className="song-list">{busy && !songs.length ? <div className="empty-state"><div className="loader"></div><span>Finding your next favorite…</span></div> : songs.map((song, index) => <article className="song-row" key={song.trackId || index}><span className="song-index">{String(index + 1).padStart(2, '0')}</span><div className="cover-wrap">{song.artworkUrl ? <img src={song.artworkUrl} alt=""/> : <div className="cover-fallback" style={{'--cover': moods.find(m => m.name === mood)?.color}}><Disc3 size={22}/></div>}</div><button className="song-title" onClick={() => togglePlay(song)}><strong>{song.trackName}</strong><span>{song.artistName}{song.albumName ? ` · ${song.albumName}` : ''}</span></button><span className="song-language">{song.language || language}</span><button className="play-button" aria-label={playing === song.trackId ? 'Pause preview' : 'Play preview'} onClick={() => togglePlay(song)}>{playing === song.trackId ? <Pause size={16}/> : <Play size={16}/>}</button></article>)}
-            {!busy && songs.length === 0 && !message && <div className="empty-state"><Music2 size={24}/><span>Your next favorite is just around the corner.</span></div>}
+          <div className="song-list">{view === 'recommendations' && busy && !songs.length ? <div className="empty-state"><div className="loader"></div><span>Finding your next favorite…</span></div> : (view === 'favorites' ? favorites : songs).map((song, index) => <article className="song-row" key={song.trackId || index}><span className="song-index">{String(index + 1).padStart(2, '0')}</span><div className="cover-wrap">{song.artworkUrl ? <img src={song.artworkUrl} alt=""/> : <div className="cover-fallback" style={{'--cover': moods.find(m => m.name === mood)?.color}}><Disc3 size={22}/></div>}</div><button className="song-title" onClick={() => togglePlay(song)}><strong>{song.trackName}</strong><span>{song.artistName}{song.albumName ? ` · ${song.albumName}` : ''}</span></button><span className="song-language">{song.language || language}</span><button className="play-button" aria-label={playing === song.trackId ? 'Pause preview' : 'Play preview'} onClick={() => togglePlay(song)}>{playing === song.trackId ? <Pause size={16}/> : <Play size={16}/>}</button><button type="button" className={`favorite-button ${favorites.some(item => item.trackId === song.trackId) ? 'saved' : ''}`} aria-label={favorites.some(item => item.trackId === song.trackId) ? `Remove ${song.trackName} from favorites` : `Add ${song.trackName} to favorites`} aria-pressed={favorites.some(item => item.trackId === song.trackId)} onClick={() => toggleFavorite(song)}><Heart size={16}/></button></article>)}
+            {view === 'favorites' && favorites.length === 0 && <div className="empty-state"><Heart size={22}/><span>No favorites yet. Save a song with the heart button.</span></div>}
+            {view === 'recommendations' && !busy && songs.length === 0 && !message && <div className="empty-state"><Music2 size={24}/><span>Your next favorite is just around the corner.</span></div>}
           </div>
-          <div className="list-footer"><span>{songs.length} songs picked for you</span><span className="powered"><span className="powered-dot"></span> Powered by your mood</span></div>
+          <div className="list-footer"><span>{view === 'favorites' ? `${favorites.length} saved songs` : `${songs.length} songs picked for you`}</span><span className="powered"><span className="powered-dot"></span>{view === 'favorites' ? 'Saved on this browser' : 'Powered by your mood'}</span></div>
         </section>
         <footer><span>© 2026 VibeWave Music</span><span>Made for listening, and feeling.</span></footer>
       </div>

@@ -1,6 +1,6 @@
 # VibeWave Music
 
-VibeWave Music is a mood-based music discovery prototype built with React, Vite, Node.js, Express, and optional MongoDB persistence for favorites. It uses the included Spotify track catalog and a small KNN voice-emotion model trained from labeled RAVDESS WAV clips.
+VibeWave Music is a mood-based music discovery prototype built with React, Vite, Node.js, Express, and optional MongoDB persistence for favorites. It uses the included Spotify track catalog and a small KNN voice-emotion model trained from labeled RAVDESS WAV clips. Users can save songs to a Favorites view; the browser keeps a local copy, with optional server-side syncing through an anonymous signed session.
 
 ## Run locally
 
@@ -23,7 +23,7 @@ Voice analysis accepts WAV audio. The API supports PCM and IEEE float WAV format
 
 ## MongoDB
 
-The backend works without MongoDB, using local catalog data and temporary in-memory favorites. Favorites are associated with a signed, anonymous browser cookie; they are not a user account or authentication system. To persist favorites in MongoDB, copy `server/.env.example` to `server/.env`, set `MONGODB_URI` and a long random `FAVORITES_SESSION_SECRET`, and start a local MongoDB server or provide a MongoDB connection string. Set both values in Vercel when using MongoDB there. Without either secret or MongoDB URI, favorites endpoints return an unavailable response on Vercel rather than sharing favorites across visitors.
+The backend works without MongoDB, using local catalog data and temporary in-memory favorites. The client keeps favorites in browser storage and mirrors them through the API when it is available. Server favorites are associated with a signed, anonymous browser cookie; they are not a user account or authentication system. To persist favorites in MongoDB, copy `server/.env.example` to `server/.env`, set `MONGODB_URI` and a long random `FAVORITES_SESSION_SECRET`, and start a local MongoDB server or provide a MongoDB connection string. Set both values in Vercel when using MongoDB there. Without either secret or MongoDB URI, server-side favorites are unavailable on Vercel, but the browser copy continues to work.
 
 ## Project layout
 
