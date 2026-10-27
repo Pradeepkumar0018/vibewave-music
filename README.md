@@ -1,6 +1,6 @@
 # VibeWave Music
 
-VibeWave Music is a mood-based music discovery app built with React, Vite, Node.js, Express, and MongoDB support. It uses the included Spotify track catalog and a voice-emotion model trained from the included RAVDESS WAV clips.
+VibeWave Music is a mood-based music discovery prototype built with React, Vite, Node.js, Express, and optional MongoDB persistence for favorites. It uses the included Spotify track catalog and a small KNN voice-emotion model trained from labeled RAVDESS WAV clips.
 
 ## Run locally
 
@@ -19,16 +19,16 @@ The generated voice model is included at `server/models/emotion-knn.json`. To re
 npm run train:model
 ```
 
-Voice analysis accepts WAV audio. The API supports PCM and IEEE float WAV formats. Recommendations use the local catalog, so they work without MongoDB or a Spotify API key. If no preview URL is present in the catalog, selecting play opens the song's Spotify track page.
+Voice analysis accepts WAV audio. The API supports PCM and IEEE float WAV formats. The recording is analyzed in memory and is not saved by the app. The voice result is an experimental estimate, not a validated measure of a person's actual mood; the project does not currently publish model accuracy metrics. Recommendations use a simple valence/energy match against the local catalog, so they work without MongoDB or a Spotify API key. This is song discovery, not a music streaming service: if a preview URL is absent, selecting play opens the song's Spotify track page.
 
 ## MongoDB
 
-The backend works without MongoDB, using local catalog data and session-only favorites. To store favorites in MongoDB, copy `server/.env.example` to `server/.env`, set `MONGODB_URI`, and start a local MongoDB server or provide a MongoDB connection string.
+The backend works without MongoDB, using local catalog data and temporary in-memory favorites. Favorites are associated with a signed, anonymous browser cookie; they are not a user account or authentication system. To persist favorites in MongoDB, copy `server/.env.example` to `server/.env`, set `MONGODB_URI` and a long random `FAVORITES_SESSION_SECRET`, and start a local MongoDB server or provide a MongoDB connection string. Set both values in Vercel when using MongoDB there. Without either secret or MongoDB URI, favorites endpoints return an unavailable response on Vercel rather than sharing favorites across visitors.
 
 ## Project layout
 
 - `client/` React and Vite application
-- `server/` Express API, Mongoose user model, recommendation logic, and voice model
+- `server/` Express API, anonymous favorites session model, recommendation logic, and voice model
 - `data/spotify_tracks.csv` music catalog
 - `data/ravdess/` emotion-labeled WAV training data
 

@@ -1,9 +1,10 @@
 import 'dotenv/config';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import User from './models/User.js';
+import FavoriteSession from './models/FavoriteSession.js';
 import { getCatalog, recommend } from './services/catalog.js';
 import { loadModel, predictEmotion } from './services/emotionModel.js';
 
@@ -12,6 +13,27 @@ app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
 app.use(express.json({ limit: '1mb' }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 const memoryFavorites = new Map();
+const favoritesSecret = process.env.FAVORITES_SESSION_SECRET || process.env.MONGODB_URI || (process.env.VERCEL ? '' : randomBytes(32).toString('hex'));
+
+function getFavoritesSession(req, res) {
+  if (!favoritesSecret) return null;
+  const cookies = Object.fromEntries((req.headers.cookie || '').split(';').map(cookie => {
+    const separator = cookie.indexOf('=');
+    return separator < 0 ? ['', ''] : [cookie.slice(0, separator).trim(), cookie.slice(separator + 1).trim()];
+  }).filter(([name]) => name));
+  const [sessionId, signature] = (cookies.vibewave_session || '').split('.');
+  if (sessionId && signature && /^[a-f0-9]{64}$/.test(sessionId)) {
+    const expected = createHmac('sha256', favoritesSecret).update(sessionId).digest();
+    let supplied;
+    try { supplied = Buffer.from(signature, 'base64url'); } catch { supplied = Buffer.alloc(0); }
+    if (supplied.length === expected.length && timingSafeEqual(supplied, expected)) return sessionId;
+  }
+  const id = randomBytes(32).toString('hex');
+  const signed = createHmac('sha256', favoritesSecret).update(id).digest('base64url');
+  const secure = process.env.VERCEL || process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.append('Set-Cookie', `vibewave_session=${id}.${signed}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure}`);
+  return id;
+}
 
 app.get('/api/health', async (_req, res) => {
   const model = await loadModel();
@@ -40,37 +62,42 @@ app.post('/api/emotion/analyze', upload.single('audio'), async (req, res) => {
 
 app.get('/api/favorites', async (req, res, next) => {
   try {
+    const sessionId = getFavoritesSession(req, res);
+    if (!sessionId) return res.status(503).json({ error: 'Favorites need FAVORITES_SESSION_SECRET or MONGODB_URI to sign the browser session.' });
     if (mongoose.connection.readyState === 1) {
-      const user = await User.findOne({ email: req.query.email || 'local@vibewave.music' }).lean();
-      return res.json(user?.favorites || []);
+      const session = await FavoriteSession.findOne({ sessionId }).lean();
+      return res.json(session?.favorites || []);
     }
-    return res.json(memoryFavorites.get(req.query.email || 'local') || []);
+    return res.json(memoryFavorites.get(sessionId) || []);
   } catch (error) { next(error); }
 });
 
 app.post('/api/favorites', async (req, res, next) => {
   try {
-    const { song, email = 'local@vibewave.music' } = req.body;
+    const sessionId = getFavoritesSession(req, res);
+    if (!sessionId) return res.status(503).json({ error: 'Favorites need FAVORITES_SESSION_SECRET or MONGODB_URI to sign the browser session.' });
+    const { song } = req.body;
     if (!song?.trackId) return res.status(400).json({ error: 'A song with a track ID is required.' });
     if (mongoose.connection.readyState === 1) {
-      const user = await User.findOneAndUpdate({ email }, { $addToSet: { favorites: song } }, { upsert: true, new: true, setDefaultsOnInsert: true });
-      return res.json(user.favorites);
+      const session = await FavoriteSession.findOneAndUpdate({ sessionId }, { $addToSet: { favorites: song } }, { upsert: true, new: true, setDefaultsOnInsert: true });
+      return res.json(session.favorites);
     }
-    const favorites = memoryFavorites.get(email) || [];
+    const favorites = memoryFavorites.get(sessionId) || [];
     if (!favorites.some(item => item.trackId === song.trackId)) favorites.push(song);
-    memoryFavorites.set(email, favorites); res.json(favorites);
+    memoryFavorites.set(sessionId, favorites); res.json(favorites);
   } catch (error) { next(error); }
 });
 
 app.delete('/api/favorites/:trackId', async (req, res, next) => {
   try {
-    const email = req.query.email || 'local@vibewave.music';
+    const sessionId = getFavoritesSession(req, res);
+    if (!sessionId) return res.status(503).json({ error: 'Favorites need FAVORITES_SESSION_SECRET or MONGODB_URI to sign the browser session.' });
     if (mongoose.connection.readyState === 1) {
-      const user = await User.findOneAndUpdate({ email }, { $pull: { favorites: { trackId: req.params.trackId } } }, { new: true });
-      return res.json(user?.favorites || []);
+      const session = await FavoriteSession.findOneAndUpdate({ sessionId }, { $pull: { favorites: { trackId: req.params.trackId } } }, { new: true });
+      return res.json(session?.favorites || []);
     }
-    const favorites = (memoryFavorites.get(email) || []).filter(item => item.trackId !== req.params.trackId);
-    memoryFavorites.set(email, favorites); res.json(favorites);
+    const favorites = (memoryFavorites.get(sessionId) || []).filter(item => item.trackId !== req.params.trackId);
+    memoryFavorites.set(sessionId, favorites); res.json(favorites);
   } catch (error) { next(error); }
 });
 

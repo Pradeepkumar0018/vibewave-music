@@ -55,7 +55,7 @@ export default function App() {
       const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Audio analysis failed');
       setMood(data.emotion);
       await loadSongs(data.emotion, language);
-      setMessage(`We heard ${data.emotion.toLowerCase()} in your voice.`);
+      setMessage(`Voice estimate: ${data.emotion.toLowerCase()}.`);
     } catch (err) { setMessage(err.message || 'Could not analyze that recording.'); }
     finally { setBusy(false); }
   }
